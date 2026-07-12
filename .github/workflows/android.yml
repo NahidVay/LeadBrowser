@@ -40,3 +40,4 @@ jobs:
         with:
           name: LeadBrowser-Debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          
