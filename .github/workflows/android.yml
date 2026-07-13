@@ -1,8 +1,6 @@
-name: Build LeadBrowser APK
+name: Build Android APK
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -11,7 +9,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -20,39 +18,63 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required SDK components
+      - name: Install unzip
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" \
-                     "build-tools;35.0.0" \
-                     "platform-tools" \
-                     "ndk;26.1.10909125"
+          sudo apt-get update
+          sudo apt-get install -y unzip
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build debug APK
-        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
-
-      - name: Show APK info
+      - name: Find ZIP
         run: |
-          ls -lh app/build/outputs/apk/debug/
-          echo "APK built successfully."
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
 
-      - name: Upload APK artifact
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found!"
+            exit 1
+          fi
+
+          echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_ENV
+          echo "Found ZIP: $ZIP_FILE"
+
+      - name: Extract ZIP
+        run: |
+          mkdir project
+          unzip -q "$ZIP_FILE" -d project
+
+      - name: Find Android Project
+        run: |
+          PROJECT_DIR=$(find project -name gradlew -exec dirname {} \; | head -n 1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "gradlew not found!"
+            find project
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Project: $PROJECT_DIR"
+
+      - name: Grant Permission
+        run: chmod +x "$PROJECT_DIR/gradlew"
+
+      - name: Build Debug APK
+        run: |
+          cd "$PROJECT_DIR"
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Find APK
+        run: |
+          APK=$(find "$PROJECT_DIR" -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK not found!"
+            exit 1
+          fi
+
+          echo "APK_FILE=$APK" >> $GITHUB_ENV
+          echo "APK: $APK"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LeadBrowser-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          name: LeadBrowser-Debug
+          path: ${{ env.APK_FILE }}
