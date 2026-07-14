@@ -2,11 +2,14 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Checkout Repository
@@ -16,65 +19,94 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
+          cache: gradle
 
       - name: Install unzip
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
 
       - name: Find ZIP
+        shell: bash
         run: |
-          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
+          set -e
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "No ZIP file found!"
+          ZIP_COUNT=$(find . -type f -iname "*.zip" \
+            ! -path "./.git/*" \
+            ! -path "./.github/*" | wc -l)
+
+          if [ "$ZIP_COUNT" -eq 0 ]; then
+            echo "❌ No ZIP file found."
             exit 1
           fi
+
+          if [ "$ZIP_COUNT" -gt 1 ]; then
+            echo "❌ Multiple ZIP files found:"
+            find . -type f -iname "*.zip" \
+              ! -path "./.git/*" \
+              ! -path "./.github/*"
+            exit 1
+          fi
+
+          ZIP_FILE=$(find . -type f -iname "*.zip" \
+            ! -path "./.git/*" \
+            ! -path "./.github/*" | head -n 1)
 
           echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_ENV
-          echo "Found ZIP: $ZIP_FILE"
+          echo "✅ ZIP Found: $ZIP_FILE"
 
       - name: Extract ZIP
+        shell: bash
         run: |
-          mkdir project
-          unzip -q "$ZIP_FILE" -d project
+          mkdir extracted
+          unzip -q "$ZIP_FILE" -d extracted
 
       - name: Find Android Project
+        shell: bash
         run: |
-          PROJECT_DIR=$(find project -name gradlew -exec dirname {} \; | head -n 1)
+          set -e
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "gradlew not found!"
-            find project
+          PROJECT_FILE=$(find extracted \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "❌ Android project not found."
             exit 1
           fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
-          echo "Project: $PROJECT_DIR"
+          echo "✅ Project: $PROJECT_DIR"
 
-      - name: Grant Permission
-        run: chmod +x "$PROJECT_DIR/gradlew"
-
-      - name: Build Debug APK
+      - name: Grant Execute Permission
+        shell: bash
         run: |
           cd "$PROJECT_DIR"
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          ./gradlew assembleDebug --stacktrace
 
       - name: Find APK
+        shell: bash
         run: |
-          APK=$(find "$PROJECT_DIR" -name "*.apk" | head -n 1)
+          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "APK not found!"
+            echo "❌ APK not found."
             exit 1
           fi
 
-          echo "APK_FILE=$APK" >> $GITHUB_ENV
-          echo "APK: $APK"
+          echo "APK_PATH=$APK" >> $GITHUB_ENV
+          echo "✅ APK: $APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LeadBrowser-Debug
-          path: ${{ env.APK_FILE }}
+          name: LeadBrowser-APK
+          path: ${{ env.APK_PATH }}
